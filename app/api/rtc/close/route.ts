@@ -15,7 +15,9 @@ export async function POST(req: Request): Promise<Response> {
       r.answer = undefined;
       r.offerCandidates = [];
       r.answerCandidates = [];
+      r.stopped = true; // explicitly stopped
       r.updatedAt = Date.now();
+      r.revision += 1;
     }
 
     return new Response(JSON.stringify({ ok: true }), {

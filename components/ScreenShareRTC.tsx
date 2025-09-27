@@ -7,7 +7,7 @@ import { generateRoomCode } from "./useRoomCode";
 type Role = "presenter" | "viewer";
 type Mode = "mirror" | "extend";
 
-type OfferAnswerResp = { sdp: RTCSessionDescriptionInit | null };
+type OfferAnswerResp = { sdp: RTCSessionDescriptionInit | null; stopped?: boolean };
 type CandidateResp = { items: RTCIceCandidateInit[]; next: number };
 
 export default function ScreenShareRTC() {
@@ -19,24 +19,22 @@ export default function ScreenShareRTC() {
   const [copyOk, setCopyOk] = useState<boolean>(false);
 
   // Overlays
-  const [showStoppedOverlay, setShowStoppedOverlay] = useState<boolean>(false); // yalnız STOP zamanı
-  const [hasRemote, setHasRemote] = useState<boolean>(false); // viewer-ə remote düşübmü?
+  const [showStoppedOverlay, setShowStoppedOverlay] = useState<boolean>(false); // ONLY when presenter explicitly stops
+  const [hasRemote, setHasRemote] = useState<boolean>(false);                   // viewer has remote stream
 
-  // Presenter üçün STOP/RESUME
+  // Presenter STOP / RESUME
   const [isStopped, setIsStopped] = useState<boolean>(false);
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const extendWindowRef = useRef<Window | null>(null);
-
-  // Single video:
   const videoRef = useRef<HTMLVideoElement>(null);
 
   // Polling state
-  const offerCandIdx = useRef<number>(0);  // viewer → offer ICE
-  const answerCandIdx = useRef<number>(0); // presenter → answer ICE
+  const offerCandIdx = useRef<number>(0);   // viewer pulls offer ICE
+  const answerCandIdx = useRef<number>(0);  // presenter pulls answer ICE
   const pollTimers = useRef<number[]>([]);
-  const hadRemoteRef = useRef<boolean>(false); // əvvəl stream görmüşdüsə
+  const hadRemoteRef = useRef<boolean>(false);
 
   const rtcConfig = useMemo<RTCConfiguration>(
     () => ({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] }),
@@ -118,7 +116,7 @@ export default function ScreenShareRTC() {
 
   useEffect(() => () => { void leave(); }, [leave]);
 
-  // ---------- Presenter: start (Mirror/Extend) ----------
+  // ---------- Presenter: start ----------
   const startAsPresenter = useCallback(async (): Promise<void> => {
     try {
       const r = room || generateRoomCode();
@@ -133,7 +131,7 @@ export default function ScreenShareRTC() {
         };
         stream = await navigator.mediaDevices.getDisplayMedia(constraints);
       } else {
-        // Extend: ayrıca pəncərə açılır; istifadəçi screen-picker-də bu pəncərəni seçməlidir
+        // Extend helper window (user must pick this window in the picker)
         const win = window.open("", "ExtendedSurface", "width=1280,height=720");
         if (!win) {
           alert("Popup blocked. Allow popups for this site.");
@@ -171,6 +169,11 @@ export default function ScreenShareRTC() {
         stream = await navigator.mediaDevices.getDisplayMedia(constraints);
       }
 
+      // If user stops from the browser bar, reflect that as explicit STOP:
+      stream.getVideoTracks().forEach((t) => {
+        t.onended = () => { void apiPOST("/api/rtc/close", { room: r }); setIsStopped(true); setStatus("Stopped"); };
+      });
+
       localStreamRef.current = stream;
 
       await ensurePC();
@@ -179,11 +182,11 @@ export default function ScreenShareRTC() {
       pc.getSenders().forEach((s) => { try { pc.removeTrack(s); } catch { /* noop */ } });
       stream.getTracks().forEach((t) => pc.addTrack(t, stream));
 
-      // Mirror -> preview; Extend -> preview yoxdur
+      // Mirror → preview; Extend → no preview
       if (mode === "mirror" && videoRef.current) videoRef.current.srcObject = stream;
       if (mode === "extend" && videoRef.current) videoRef.current.srcObject = null;
 
-      // offer → server
+      // offer → server (also clears stopped=false there)
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
       await apiPOST<unknown, { room: string; sdp: RTCSessionDescriptionInit }>("/api/rtc/offer", {
@@ -234,7 +237,6 @@ export default function ScreenShareRTC() {
   }, [apiGET, apiPOST, ensurePC, mode, room]);
 
   const stopPresenting = useCallback(async (): Promise<void> => {
-    // STOP: otağı sıfırla → viewer offer=null görəcək → overlay yalnız bu halda çıxacaq
     try { await apiPOST<unknown, { room: string }>("/api/rtc/close", { room }); } catch { /* noop */ }
 
     const local = localStreamRef.current;
@@ -245,28 +247,21 @@ export default function ScreenShareRTC() {
     cleanupExtendWindow();
     if (videoRef.current) videoRef.current.srcObject = null;
 
-    // PC-ni bağla; Resume yeni PC ilə başlayacaq
     const pc = pcRef.current;
-    if (pc) {
-      try { pc.close(); } catch { /* noop */ }
-      pcRef.current = null;
-    }
+    if (pc) { try { pc.close(); } catch { /* noop */ } pcRef.current = null; }
 
     setIsStopped(true);
     setStatus("Stopped");
   }, [apiPOST, room]);
 
   const resumePresenting = useCallback(async (): Promise<void> => {
-    await startAsPresenter(); // eyni room + seçilmiş mode ilə
+    await startAsPresenter();
   }, [startAsPresenter]);
 
   // ---------- Viewer ----------
   const startAsViewer = useCallback(async (): Promise<void> => {
     try {
-      if (!room) {
-        alert("Otaq kodu daxil edin.");
-        return;
-      }
+      if (!room) { alert("Otaq kodu daxil edin."); return; }
       await ensurePC();
       setRole("viewer");
       setJoined(true);
@@ -277,22 +272,22 @@ export default function ScreenShareRTC() {
 
       const pc = pcRef.current!;
 
-      // Offer poll → Always accept latest offer (even after resume)
+      // Always accept the latest offer (resume-safe)
       const offerPoll = window.setInterval(async () => {
         try {
           const data = await apiGET<OfferAnswerResp>(`/api/rtc/offer?room=${encodeURIComponent(room)}`);
           const sdp = data.sdp;
+          const explicitlyStopped = Boolean(data.stopped);
 
-          // STOP-dan sonra: əvvəllər stream var idi və indi offer yoxdursa → overlay
-          if (!sdp && (hadRemoteRef.current || status === "Connected" || status === "Answer posted")) {
+          // Only show "stopped" if presenter explicitly stopped
+          if (!sdp && explicitlyStopped && (hadRemoteRef.current || status === "Connected" || status === "Answer posted")) {
             setShowStoppedOverlay(true);
             setStatus("Presenter stopped");
             return;
           }
 
           if (sdp) {
-            setShowStoppedOverlay(false); // yeni offer → overlay gizlə
-            // Yeni offer-i hər dəfə qəbul et (resume də daxil)
+            setShowStoppedOverlay(false); // new share incoming
             await pc.setRemoteDescription(new RTCSessionDescription(sdp));
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
@@ -306,7 +301,7 @@ export default function ScreenShareRTC() {
       }, 900);
       pollTimers.current.push(offerPoll);
 
-      // Presenter ICE-lər
+      // Presenter ICE
       const candPoll = window.setInterval(async () => {
         try {
           const data = await apiGET<CandidateResp>(
@@ -359,7 +354,7 @@ export default function ScreenShareRTC() {
   };
   const gen = (): void => setRoom(generateRoomCode());
 
-  // Loading overlay şərti (viewer qoşulub, stream hələ gəlməyib, stop da deyil)
+  // Loading overlay: viewer joined, no stopped flag, but remote not yet present
   const showLoading = role === "viewer" && joined && !showStoppedOverlay && !hasRemote;
 
   return (
@@ -367,12 +362,8 @@ export default function ScreenShareRTC() {
       <CardBody>
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
-            <h2 className="text-2xl font-semibold text-white drop-shadow-sm">
-              Simple Screen Share
-            </h2>
-            <p className="text-slate-300/90 text-sm mt-1">
-              Rol seç → Presenter otaq yaradır (kod), Viewer kodla qoşulur.
-            </p>
+            <h2 className="text-2xl font-semibold text-white drop-shadow-sm">Simple Screen Share</h2>
+            <p className="text-slate-300/90 text-sm mt-1">Rol seç → Presenter otaq yaradır (kod), Viewer kodla qoşulur.</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Tag>Role: {role ?? "-"}</Tag>
@@ -383,84 +374,37 @@ export default function ScreenShareRTC() {
 
         {!joined && (
           <div className="mt-6 space-y-4">
-            {/* Roles */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <Button
-                className={`w-full ${role === "presenter" ? "" : "bg-slate-700/70 hover:bg-slate-700/80"} backdrop-blur`}
-                onClick={() => setRole("presenter")}
-              >
-                I am Presenter
-              </Button>
-              <Button
-                className={`w-full ${role === "viewer" ? "bg-sky-600/90 hover:bg-sky-600" : "bg-slate-700/70 hover:bg-slate-700/80"} backdrop-blur`}
-                onClick={() => setRole("viewer")}
-              >
-                I am Viewer
-              </Button>
+              <Button className={`w-full ${role === "presenter" ? "" : "bg-slate-700/70 hover:bg-slate-700/80"} backdrop-blur`} onClick={() => setRole("presenter")}>I am Presenter</Button>
+              <Button className={`w-full ${role === "viewer" ? "bg-sky-600/90 hover:bg-sky-600" : "bg-slate-700/70 hover:bg-slate-700/80"} backdrop-blur`} onClick={() => setRole("viewer")}>I am Viewer</Button>
             </div>
 
-            {/* Presenter: Mode + code */}
             {role === "presenter" && (
               <>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <Button
-                    className={`w-full ${mode === "mirror" ? "" : "bg-slate-700/70 hover:bg-slate-700/80"} backdrop-blur`}
-                    onClick={() => setMode("mirror")}
-                  >
-                    Mirror
-                  </Button>
-                  <Button
-                    className={`w-full ${mode === "extend" ? "" : "bg-slate-700/70 hover:bg-slate-700/80"} backdrop-blur`}
-                    onClick={() => setMode("extend")}
-                  >
-                    Extend
-                  </Button>
+                  <Button className={`w-full ${mode === "mirror" ? "" : "bg-slate-700/70 hover:bg-slate-700/80"} backdrop-blur`} onClick={() => setMode("mirror")}>Mirror</Button>
+                  <Button className={`w-full ${mode === "extend" ? "" : "bg-slate-700/70 hover:bg-slate-700/80"} backdrop-blur`} onClick={() => setMode("extend")}>Extend</Button>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto_auto_auto] gap-2">
-                  <Input
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    placeholder="Otaq kodu (8 rəqəm)"
-                    maxLength={8}
-                    value={room}
-                    onChange={(e) =>
-                      setRoom(e.target.value.replace(/\D/g, "").slice(0, 8))
-                    }
-                  />
+                  <Input inputMode="numeric" pattern="[0-9]*" placeholder="Otaq kodu (8 rəqəm)" maxLength={8} value={room} onChange={(e) => setRoom(e.target.value.replace(/\D/g, "").slice(0, 8))} />
                   <Button className="w-full sm:w-auto" onClick={gen}>Generate</Button>
                   <Button className="w-full sm:w-auto" onClick={copyRoom}>{copyOk ? "Copied ✓" : "Copy"}</Button>
                   <div className="hidden sm:block" />
                   {!isStopped ? (
-                    <Button className="w-full sm:w-auto" onClick={startAsPresenter}>
-                      Start (Presenter)
-                    </Button>
+                    <Button className="w-full sm:w-auto" onClick={startAsPresenter}>Start (Presenter)</Button>
                   ) : (
-                    <Button className="w-full sm:w-auto bg-emerald-600/90 hover:bg-emerald-600" onClick={resumePresenting}>
-                      Resume
-                    </Button>
+                    <Button className="w-full sm:w-auto bg-emerald-600/90 hover:bg-emerald-600" onClick={resumePresenting}>Resume</Button>
                   )}
                 </div>
               </>
             )}
 
-            {/* Viewer: code + join */}
             {role === "viewer" && (
               <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto_auto] gap-2">
-                <Input
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  placeholder="Otaq kodu (8 rəqəm)"
-                  maxLength={8}
-                  value={room}
-                  onChange={(e) =>
-                    setRoom(e.target.value.replace(/\D/g, "").slice(0, 8))
-                  }
-                />
+                <Input inputMode="numeric" pattern="[0-9]*" placeholder="Otaq kodu (8 rəqəm)" maxLength={8} value={room} onChange={(e) => setRoom(e.target.value.replace(/\D/g, "").slice(0, 8))} />
                 <Button className="w-full sm:w-auto" onClick={copyRoom}>{copyOk ? "Copied ✓" : "Copy"}</Button>
-                <Button className="w-full sm:w-auto bg-sky-600/90 hover:bg-sky-600" onClick={startAsViewer}>
-                  Join (Viewer)
-                </Button>
+                <Button className="w-full sm:w-auto bg-sky-600/90 hover:bg-sky-600" onClick={startAsViewer}>Join (Viewer)</Button>
               </div>
             )}
           </div>
@@ -499,7 +443,7 @@ export default function ScreenShareRTC() {
               </Button>
             </div>
 
-            {/* Single video + overlays (glassmorphism) */}
+            {/* Single video + overlays */}
             <div className="relative rounded-2xl overflow-hidden border border-white/10 bg-white/10 backdrop-blur-xl shadow-xl">
               <video
                 ref={videoRef}
@@ -521,7 +465,7 @@ export default function ScreenShareRTC() {
                 </div>
               )}
 
-              {/* STOPPED (only when presenter pressed Stop) */}
+              {/* STOPPED (only when presenter pressed Stop or ended sharing) */}
               {showStoppedOverlay && role === "viewer" && (
                 <div className="absolute inset-0 grid place-items-center bg-black/50 backdrop-blur-sm">
                   <div className="px-5 py-3 rounded-2xl bg-white/10 border border-white/20 text-white text-xl font-semibold shadow-2xl">

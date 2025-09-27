@@ -13,10 +13,10 @@ export async function GET(req: Request): Promise<Response> {
     });
   }
   const r = ROOMS.get(room);
-  return new Response(JSON.stringify({ sdp: r?.offer ?? null }), {
-    status: 200,
-    headers: { "content-type": "application/json" },
-  });
+  return new Response(
+    JSON.stringify({ sdp: r?.offer ?? null, stopped: r?.stopped ?? false }),
+    { status: 200, headers: { "content-type": "application/json" } }
+  );
 }
 
 export async function POST(req: Request): Promise<Response> {
@@ -26,15 +26,18 @@ export async function POST(req: Request): Promise<Response> {
       sdp?: RTCSessionDescriptionInit;
     };
     const { room, sdp } = body;
-    if (!room || !sdp) {
+    if (!room || !sdp)
       return new Response("room and sdp required", { status: 400 });
-    }
+
     const r = getRoom(room);
     r.offer = sdp;
     r.answer = undefined;
     r.offerCandidates = [];
     r.answerCandidates = [];
+    r.stopped = false; // presenter is actively sharing now
     r.updatedAt = Date.now();
+    r.revision += 1;
+
     return new Response(JSON.stringify({ ok: true }), {
       status: 200,
       headers: { "content-type": "application/json" },
