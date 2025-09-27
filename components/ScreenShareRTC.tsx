@@ -17,22 +17,26 @@ export default function ScreenShareRTC() {
   const [joined, setJoined] = useState<boolean>(false);
   const [status, setStatus] = useState<string>("Idle");
   const [copyOk, setCopyOk] = useState<boolean>(false);
-  const [leftOverlay, setLeftOverlay] = useState<boolean>(false); // viewer overlay
+
+  // Overlays
+  const [showStoppedOverlay, setShowStoppedOverlay] = useState<boolean>(false); // yalnız STOP zamanı
+  const [hasRemote, setHasRemote] = useState<boolean>(false); // viewer-ə remote düşübmü?
+
+  // Presenter üçün STOP/RESUME
+  const [isStopped, setIsStopped] = useState<boolean>(false);
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const extendWindowRef = useRef<Window | null>(null);
 
-  // Single video element:
-  // - presenter: shows own preview ONLY in Mirror mode
-  // - viewer: shows remote stream
+  // Single video:
   const videoRef = useRef<HTMLVideoElement>(null);
 
   // Polling state
-  const offerCandIdx = useRef<number>(0);  // viewer pulls offer-side ICE
-  const answerCandIdx = useRef<number>(0); // presenter pulls answer-side ICE
+  const offerCandIdx = useRef<number>(0);  // viewer → offer ICE
+  const answerCandIdx = useRef<number>(0); // presenter → answer ICE
   const pollTimers = useRef<number[]>([]);
-  const hadRemoteRef = useRef<boolean>(false); // viewer: did we ever receive remote?
+  const hadRemoteRef = useRef<boolean>(false); // əvvəl stream görmüşdüsə
 
   const rtcConfig = useMemo<RTCConfiguration>(
     () => ({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] }),
@@ -43,7 +47,6 @@ export default function ScreenShareRTC() {
     const r = await fetch(url, { cache: "no-store" });
     return (await r.json()) as T;
   }, []);
-
   const apiPOST = useCallback(async <TRes, TBody extends object>(url: string, body: TBody): Promise<TRes> => {
     const r = await fetch(url, {
       method: "POST",
@@ -69,29 +72,9 @@ export default function ScreenShareRTC() {
       if (role === "viewer" && videoRef.current) {
         const [stream] = e.streams;
         hadRemoteRef.current = true;
-        setLeftOverlay(false);
+        setHasRemote(true);
+        setShowStoppedOverlay(false);
         videoRef.current.srcObject = stream;
-
-        // When presenter stops, tracks end → show LEFT overlay
-        stream.getTracks().forEach((t) => {
-          t.onended = () => {
-            setLeftOverlay(true);
-            setStatus("Presenter left");
-          };
-        });
-
-        // Also listen for the (standard) "inactive" event on the stream
-        stream.addEventListener("inactive", () => {
-          setLeftOverlay(true);
-          setStatus("Presenter left");
-        });
-      }
-    };
-
-    pc.onconnectionstatechange = () => {
-      const s = pc.connectionState;
-      if (role === "viewer" && (s === "disconnected" || s === "failed" || s === "closed")) {
-        setLeftOverlay(true);
       }
     };
   }, [apiPOST, room, role, rtcConfig]);
@@ -126,20 +109,21 @@ export default function ScreenShareRTC() {
       pcRef.current = null;
     }
     hadRemoteRef.current = false;
+    setHasRemote(false);
     setJoined(false);
     setStatus("Left");
-    setLeftOverlay(false);
+    setShowStoppedOverlay(false);
+    setIsStopped(false);
   }, []);
 
   useEffect(() => () => { void leave(); }, [leave]);
 
-  // ---------- Presenter ----------
+  // ---------- Presenter: start (Mirror/Extend) ----------
   const startAsPresenter = useCallback(async (): Promise<void> => {
     try {
       const r = room || generateRoomCode();
       if (!room) setRoom(r);
 
-      // 1) Local stream (Mirror or Extend)
       let stream: MediaStream;
 
       if (mode === "mirror") {
@@ -149,7 +133,7 @@ export default function ScreenShareRTC() {
         };
         stream = await navigator.mediaDevices.getDisplayMedia(constraints);
       } else {
-        // Open a helper window for "extend". We will ask user to pick THIS window in the display picker.
+        // Extend: ayrıca pəncərə açılır; istifadəçi screen-picker-də bu pəncərəni seçməlidir
         const win = window.open("", "ExtendedSurface", "width=1280,height=720");
         if (!win) {
           alert("Popup blocked. Allow popups for this site.");
@@ -158,14 +142,14 @@ export default function ScreenShareRTC() {
         extendWindowRef.current = win;
         win.document.title = "Extended Surface";
         win.document.body.style.margin = "0";
-        win.document.body.style.background = "#0f172a";
+        win.document.body.style.background = "rgba(15,23,42,.75)";
         win.document.body.innerHTML = `
-          <div style="width:100%;height:100vh;display:grid;place-items:center;color:white;font-family:Inter,system-ui;gap:16px">
+          <div style="width:100%;height:100vh;display:grid;place-items:center;color:white;font-family:Inter,system-ui;gap:16px;backdrop-filter: blur(12px)">
             <div style="text-align:center">
               <div style="font-size:20px;opacity:.9">Extended Surface</div>
-              <div style="opacity:.6">This window is being captured — select it in the picker</div>
+              <div style="opacity:.65">Pick this window in the screen picker</div>
             </div>
-            <button id="fs" style="padding:8px 14px;border-radius:10px;background:#10b981;border:none;color:white;font-weight:600;cursor:pointer">
+            <button id="fs" style="padding:10px 16px;border-radius:14px;background:rgba(16,185,129,.85);border:1px solid rgba(255,255,255,.2);box-shadow:0 10px 30px rgba(0,0,0,.25);color:white;font-weight:700;cursor:pointer;backdrop-filter:blur(8px)">
               Fullscreen
             </button>
           </div>
@@ -178,15 +162,12 @@ export default function ScreenShareRTC() {
             })();
           </script>
         `;
-
-        // Give the window a moment to render before opening the picker
         await new Promise<void>((res) => { window.setTimeout(res, 150); });
 
         const constraints: DisplayMediaStreamOptions = {
           video: { frameRate: 30 } as MediaTrackConstraints,
           audio: false,
         };
-        // NOTE: On the picker, select the "Extended Surface" window we just opened
         stream = await navigator.mediaDevices.getDisplayMedia(constraints);
       }
 
@@ -194,18 +175,15 @@ export default function ScreenShareRTC() {
 
       await ensurePC();
       const pc = pcRef.current!;
-      // Replace senders with new tracks
+      // replace senders
       pc.getSenders().forEach((s) => { try { pc.removeTrack(s); } catch { /* noop */ } });
       stream.getTracks().forEach((t) => pc.addTrack(t, stream));
 
-      // Presenter preview only in Mirror mode
-      if (mode === "mirror" && videoRef.current) {
-        videoRef.current.srcObject = stream;
-      } else if (videoRef.current) {
-        videoRef.current.srcObject = null;
-      }
+      // Mirror -> preview; Extend -> preview yoxdur
+      if (mode === "mirror" && videoRef.current) videoRef.current.srcObject = stream;
+      if (mode === "extend" && videoRef.current) videoRef.current.srcObject = null;
 
-      // 2) Create & post offer
+      // offer → server
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
       await apiPOST<unknown, { room: string; sdp: RTCSessionDescriptionInit }>("/api/rtc/offer", {
@@ -215,9 +193,10 @@ export default function ScreenShareRTC() {
 
       setRole("presenter");
       setJoined(true);
+      setIsStopped(false);
       setStatus(mode === "mirror" ? "Sharing (Mirror)" : "Sharing (Extend)");
 
-      // 3) Poll for answer
+      // poll answer
       const ansPoll = window.setInterval(async () => {
         try {
           const data = await apiGET<OfferAnswerResp>(`/api/rtc/answer?room=${encodeURIComponent(r)}`);
@@ -229,7 +208,7 @@ export default function ScreenShareRTC() {
       }, 1000);
       pollTimers.current.push(ansPoll);
 
-      // 4) Poll viewer ICE
+      // poll viewer ICE
       const candPoll = window.setInterval(async () => {
         try {
           const data = await apiGET<CandidateResp>(
@@ -255,7 +234,9 @@ export default function ScreenShareRTC() {
   }, [apiGET, apiPOST, ensurePC, mode, room]);
 
   const stopPresenting = useCallback(async (): Promise<void> => {
+    // STOP: otağı sıfırla → viewer offer=null görəcək → overlay yalnız bu halda çıxacaq
     try { await apiPOST<unknown, { room: string }>("/api/rtc/close", { room }); } catch { /* noop */ }
+
     const local = localStreamRef.current;
     if (local) {
       local.getTracks().forEach((t) => t.stop());
@@ -263,8 +244,21 @@ export default function ScreenShareRTC() {
     }
     cleanupExtendWindow();
     if (videoRef.current) videoRef.current.srcObject = null;
+
+    // PC-ni bağla; Resume yeni PC ilə başlayacaq
+    const pc = pcRef.current;
+    if (pc) {
+      try { pc.close(); } catch { /* noop */ }
+      pcRef.current = null;
+    }
+
+    setIsStopped(true);
     setStatus("Stopped");
   }, [apiPOST, room]);
+
+  const resumePresenting = useCallback(async (): Promise<void> => {
+    await startAsPresenter(); // eyni room + seçilmiş mode ilə
+  }, [startAsPresenter]);
 
   // ---------- Viewer ----------
   const startAsViewer = useCallback(async (): Promise<void> => {
@@ -274,24 +268,31 @@ export default function ScreenShareRTC() {
         return;
       }
       await ensurePC();
-      const pc = pcRef.current!;
       setRole("viewer");
       setJoined(true);
       setStatus("Waiting for offer...");
-      setLeftOverlay(false);
+      setShowStoppedOverlay(false);
+      setHasRemote(false);
       hadRemoteRef.current = false;
 
-      // 1) Poll offer → set remote → create answer → post
+      const pc = pcRef.current!;
+
+      // Offer poll → Always accept latest offer (even after resume)
       const offerPoll = window.setInterval(async () => {
         try {
           const data = await apiGET<OfferAnswerResp>(`/api/rtc/offer?room=${encodeURIComponent(room)}`);
           const sdp = data.sdp;
+
+          // STOP-dan sonra: əvvəllər stream var idi və indi offer yoxdursa → overlay
           if (!sdp && (hadRemoteRef.current || status === "Connected" || status === "Answer posted")) {
-            setLeftOverlay(true);
-            setStatus("Presenter left");
+            setShowStoppedOverlay(true);
+            setStatus("Presenter stopped");
             return;
           }
-          if (sdp && !pc.currentRemoteDescription) {
+
+          if (sdp) {
+            setShowStoppedOverlay(false); // yeni offer → overlay gizlə
+            // Yeni offer-i hər dəfə qəbul et (resume də daxil)
             await pc.setRemoteDescription(new RTCSessionDescription(sdp));
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
@@ -302,10 +303,10 @@ export default function ScreenShareRTC() {
             setStatus("Answer posted");
           }
         } catch { /* noop */ }
-      }, 1000);
+      }, 900);
       pollTimers.current.push(offerPoll);
 
-      // 2) Poll presenter ICE
+      // Presenter ICE-lər
       const candPoll = window.setInterval(async () => {
         try {
           const data = await apiGET<CandidateResp>(
@@ -330,7 +331,7 @@ export default function ScreenShareRTC() {
     }
   }, [apiGET, apiPOST, ensurePC, room, status]);
 
-  // Auto-join from URL (viewer)
+  // Auto-join (viewer)
   useEffect(() => {
     try {
       const u = new URL(window.location.href);
@@ -356,22 +357,24 @@ export default function ScreenShareRTC() {
     setCopyOk(true);
     window.setTimeout(() => setCopyOk(false), 1000);
   };
-
   const gen = (): void => setRoom(generateRoomCode());
+
+  // Loading overlay şərti (viewer qoşulub, stream hələ gəlməyib, stop da deyil)
+  const showLoading = role === "viewer" && joined && !showStoppedOverlay && !hasRemote;
 
   return (
     <Card>
       <CardBody>
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
-            <h2 className="text-xl md:text-2xl font-semibold text-white">
-              Simple Screen Share (HTTP Signaling)
+            <h2 className="text-2xl font-semibold text-white drop-shadow-sm">
+              Simple Screen Share
             </h2>
-            <p className="text-slate-300 text-sm mt-1">
+            <p className="text-slate-300/90 text-sm mt-1">
               Rol seç → Presenter otaq yaradır (kod), Viewer kodla qoşulur.
             </p>
           </div>
-          <div className="hidden md:flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Tag>Role: {role ?? "-"}</Tag>
             <Tag>Status: {status}</Tag>
             <Tag>Mode: {role === "presenter" ? mode : "-"}</Tag>
@@ -380,16 +383,16 @@ export default function ScreenShareRTC() {
 
         {!joined && (
           <div className="mt-6 space-y-4">
-            {/* Role select */}
-            <div className="flex gap-2">
+            {/* Roles */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <Button
-                className={role === "presenter" ? "" : "bg-slate-700 hover:bg-slate-700"}
+                className={`w-full ${role === "presenter" ? "" : "bg-slate-700/70 hover:bg-slate-700/80"} backdrop-blur`}
                 onClick={() => setRole("presenter")}
               >
                 I am Presenter
               </Button>
               <Button
-                className={role === "viewer" ? "bg-sky-600/90 hover:bg-sky-600" : "bg-slate-700 hover:bg-slate-700"}
+                className={`w-full ${role === "viewer" ? "bg-sky-600/90 hover:bg-sky-600" : "bg-slate-700/70 hover:bg-slate-700/80"} backdrop-blur`}
                 onClick={() => setRole("viewer")}
               >
                 I am Viewer
@@ -399,22 +402,22 @@ export default function ScreenShareRTC() {
             {/* Presenter: Mode + code */}
             {role === "presenter" && (
               <>
-                <div className="flex gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <Button
-                    className={mode === "mirror" ? "" : "bg-slate-700 hover:bg-slate-700"}
+                    className={`w-full ${mode === "mirror" ? "" : "bg-slate-700/70 hover:bg-slate-700/80"} backdrop-blur`}
                     onClick={() => setMode("mirror")}
                   >
                     Mirror
                   </Button>
                   <Button
-                    className={mode === "extend" ? "" : "bg-slate-700 hover:bg-slate-700"}
+                    className={`w-full ${mode === "extend" ? "" : "bg-slate-700/70 hover:bg-slate-700/80"} backdrop-blur`}
                     onClick={() => setMode("extend")}
                   >
                     Extend
                   </Button>
                 </div>
 
-                <div className="grid md:grid-cols-[1fr_auto_auto_auto] gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto_auto_auto] gap-2">
                   <Input
                     inputMode="numeric"
                     pattern="[0-9]*"
@@ -425,17 +428,25 @@ export default function ScreenShareRTC() {
                       setRoom(e.target.value.replace(/\D/g, "").slice(0, 8))
                     }
                   />
-                  <Button onClick={gen}>Generate</Button>
-                  <Button onClick={copyRoom}>{copyOk ? "Copied ✓" : "Copy"}</Button>
-                  <div />
-                  <Button onClick={startAsPresenter}>Start (Presenter)</Button>
+                  <Button className="w-full sm:w-auto" onClick={gen}>Generate</Button>
+                  <Button className="w-full sm:w-auto" onClick={copyRoom}>{copyOk ? "Copied ✓" : "Copy"}</Button>
+                  <div className="hidden sm:block" />
+                  {!isStopped ? (
+                    <Button className="w-full sm:w-auto" onClick={startAsPresenter}>
+                      Start (Presenter)
+                    </Button>
+                  ) : (
+                    <Button className="w-full sm:w-auto bg-emerald-600/90 hover:bg-emerald-600" onClick={resumePresenting}>
+                      Resume
+                    </Button>
+                  )}
                 </div>
               </>
             )}
 
             {/* Viewer: code + join */}
             {role === "viewer" && (
-              <div className="grid md:grid-cols-[1fr_auto_auto] gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto_auto] gap-2">
                 <Input
                   inputMode="numeric"
                   pattern="[0-9]*"
@@ -446,8 +457,8 @@ export default function ScreenShareRTC() {
                     setRoom(e.target.value.replace(/\D/g, "").slice(0, 8))
                   }
                 />
-                <Button onClick={copyRoom}>{copyOk ? "Copied ✓" : "Copy"}</Button>
-                <Button className="bg-sky-600/90 hover:bg-sky-600" onClick={startAsViewer}>
+                <Button className="w-full sm:w-auto" onClick={copyRoom}>{copyOk ? "Copied ✓" : "Copy"}</Button>
+                <Button className="w-full sm:w-auto bg-sky-600/90 hover:bg-sky-600" onClick={startAsViewer}>
                   Join (Viewer)
                 </Button>
               </div>
@@ -457,38 +468,64 @@ export default function ScreenShareRTC() {
 
         {joined && (
           <div className="mt-6 space-y-4">
-            <div className="flex items-center gap-2">
-              <Tag>Room: {room || "-"}</Tag>
-              <Tag>Role: {role ?? "-"}</Tag>
-              <Tag>Mode: {role === "presenter" ? mode : "-"}</Tag>
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <Tag>Room: {room || "-"}</Tag>
+                <Tag>Role: {role ?? "-"}</Tag>
+                <Tag>Mode: {role === "presenter" ? mode : "-"}</Tag>
+              </div>
+
+              <div className="flex-1" />
+
               {role === "viewer" && (
-                <Button className="bg-emerald-600/90 hover:bg-emerald-600 ml-auto" onClick={goFullscreen}>
+                <Button className="w-full sm:w-auto bg-emerald-600/90 hover:bg-emerald-600" onClick={goFullscreen}>
                   Fullscreen
                 </Button>
               )}
-              {role === "presenter" && (
-                <Button className="bg-amber-600/90 hover:bg-amber-600 ml-auto" onClick={stopPresenting}>
-                  Stop sharing
+
+              {role === "presenter" && !isStopped && (
+                <Button className="w-full sm:w-auto bg-amber-600/90 hover:bg-amber-600" onClick={stopPresenting}>
+                  Stop
                 </Button>
               )}
-              <Button className="bg-rose-600/90 hover:bg-rose-600" onClick={leave}>
+              {role === "presenter" && isStopped && (
+                <Button className="w-full sm:w-auto bg-emerald-600/90 hover:bg-emerald-600" onClick={resumePresenting}>
+                  Resume
+                </Button>
+              )}
+
+              <Button className="w-full sm:w-auto bg-rose-600/90 hover:bg-rose-600" onClick={leave}>
                 Leave
               </Button>
             </div>
 
-            {/* Single video + LEFT overlay for viewer */}
-            <div className="relative rounded-xl overflow-hidden border border-white/10 bg-black/60">
+            {/* Single video + overlays (glassmorphism) */}
+            <div className="relative rounded-2xl overflow-hidden border border-white/10 bg-white/10 backdrop-blur-xl shadow-xl">
               <video
                 ref={videoRef}
                 autoPlay
                 playsInline
                 muted={role === "presenter"}
-                className="w-full aspect-video"
+                className="w-full aspect-video sm:max-h-[70vh] h-[36vh] object-contain"
               />
-              {leftOverlay && role === "viewer" && (
-                <div className="absolute inset-0 grid place-items-center bg-black/70">
-                  <div className="text-3xl md:text-5xl font-bold tracking-wide text-white/90">
-                    LEFT
+
+              {/* LOADING while waiting for remote */}
+              {showLoading && (
+                <div className="absolute inset-0 grid place-items-center bg-black/40 backdrop-blur-sm">
+                  <div className="flex flex-col items-center gap-3">
+                    <div className="w-12 h-12 rounded-full border-4 border-white/30 border-t-white animate-spin" />
+                    <div className="px-4 py-2 rounded-xl bg-white/10 border border-white/20 text-white font-medium shadow-2xl">
+                      Loading…
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* STOPPED (only when presenter pressed Stop) */}
+              {showStoppedOverlay && role === "viewer" && (
+                <div className="absolute inset-0 grid place-items-center bg-black/50 backdrop-blur-sm">
+                  <div className="px-5 py-3 rounded-2xl bg-white/10 border border-white/20 text-white text-xl font-semibold shadow-2xl">
+                    Presenter stopped sharing
                   </div>
                 </div>
               )}
