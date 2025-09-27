@@ -1,4 +1,3 @@
-// app/api/rtc/close/route.ts
 import { ROOMS } from "../_store";
 
 export const runtime = "nodejs";

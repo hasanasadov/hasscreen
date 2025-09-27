@@ -6,3 +6,5 @@ export function generateRoomCode(): string {
   if (digits[0] === "0") digits[0] = String((arr[0] % 9) + 1);
   return digits.join("");
 }
+
+

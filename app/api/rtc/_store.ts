@@ -1,4 +1,3 @@
-// app/api/rtc/_store.ts
 export const runtime = "nodejs";
 
 export type RoomState = {

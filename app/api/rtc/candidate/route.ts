@@ -1,4 +1,3 @@
-// app/api/rtc/candidate/route.ts
 import { ROOMS, getRoom } from "../_store";
 
 export const runtime = "nodejs";

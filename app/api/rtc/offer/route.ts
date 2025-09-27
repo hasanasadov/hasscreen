@@ -1,4 +1,3 @@
-// app/api/rtc/offer/route.ts
 import { ROOMS, getRoom } from "../_store";
 
 export const runtime = "nodejs";
@@ -14,7 +13,11 @@ export async function GET(req: Request): Promise<Response> {
   }
   const r = ROOMS.get(room);
   return new Response(
-    JSON.stringify({ sdp: r?.offer ?? null, stopped: r?.stopped ?? false }),
+    JSON.stringify({
+      sdp: r?.offer ?? null,
+      stopped: r?.stopped ?? false,
+      revision: r?.revision ?? 0,
+    }),
     { status: 200, headers: { "content-type": "application/json" } }
   );
 }
