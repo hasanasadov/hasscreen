@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, Card, CardBody, Input, Tag } from "./ui";
+import RenderIf from "@/lib/RenderIf";
 
 type Role = "presenter" | "viewer";
 type Mode = "mirror" | "extend";
@@ -27,13 +28,13 @@ type PiPDocument = Document & {
 const generateRoomCode = (): string =>
   Math.floor(10_000_000 + Math.random() * 89_999_999).toString();
 
-/* ---- UI tint helpers ---- */
+/* ---- UI tint helpers (yenilənmiş) ---- */
 function tintBox(t: Tint): string {
   switch (t) {
-    case "connected": return "ring-emerald-400/60 bg-emerald-500/15";
-    case "paused":    return "ring-amber-400/60 bg-amber-500/15";
-    case "alone":     return "ring-sky-400/60 bg-sky-500/15";
-    case "stopped":   return "ring-rose-400/60 bg-rose-500/15";
+    case "connected": return "ring-emerald-400/60 bg-gradient-to-br from-emerald-500/10 to-emerald-400/5";
+    case "paused":    return "ring-amber-400/60 bg-gradient-to-br from-amber-500/10 to-amber-400/5";
+    case "alone":     return "ring-sky-400/60 bg-gradient-to-br from-sky-500/10 to-sky-400/5";
+    case "stopped":   return "ring-rose-400/60 bg-gradient-to-br from-rose-500/10 to-rose-400/5";
     default:          return "ring-white/15 bg-white/5";
   }
 }
@@ -49,7 +50,6 @@ function tintChip(t: Tint): string {
 
 /* ---- helpers (no any) ---- */
 function candidateInitFrom(c: RTCIceCandidate): RTCIceCandidateInit {
-  // bəzi brauzerlərdə toJSON var
   const maybe = c as RTCIceCandidate & { toJSON?: () => RTCIceCandidateInit };
   if (typeof maybe.toJSON === "function") {
     try { return maybe.toJSON(); } catch { /* noop */ }
@@ -163,7 +163,7 @@ export default function ScreenShareRTC() {
   }, []);
   useEffect(() => { if (role === "presenter" && joined && localStreamRef.current) attachLocalPreview(); }, [role, joined, attachLocalPreview]);
 
-  /* ---- PiP events (addEventListener) ---- */
+  /* ---- PiP events ---- */
   useEffect(() => {
     const v = videoRef.current as PiPVideo | null; if (!v) return;
     const onEnter = () => setPipOn(true);
@@ -174,7 +174,6 @@ export default function ScreenShareRTC() {
     if (typeof v.webkitSetPresentationMode === "function") {
       v.addEventListener("webkitpresentationmodechanged", onWebkit as EventListener);
     }
-    // initial state
     const docPiP = document as PiPDocument;
     if (typeof v.webkitPresentationMode === "string") setPipOn(v.webkitPresentationMode === "picture-in-picture");
     else setPipOn(docPiP.pictureInPictureElement === v);
@@ -205,7 +204,7 @@ export default function ScreenShareRTC() {
         if (v.readyState < 2) { try { await v.play(); } catch {} }
         await v.requestPictureInPicture();
       }
-    } catch { /* noop */ }
+    } catch {}
   };
 
   /* ---------------- Presenter: START ---------------- */
@@ -247,7 +246,6 @@ export default function ScreenShareRTC() {
 
       localStreamRef.current = stream;
 
-      // UI → sonra preview (instant)
       setRole("presenter"); setJoined(true); setIsStopped(false); setStatus("Starting…");
       requestAnimationFrame(attachLocalPreview);
 
@@ -388,15 +386,19 @@ export default function ScreenShareRTC() {
   const showLoading = role === "viewer" && joined && !showStoppedOverlay && !hasRemote;
 
   return (
-    <Card>
-      <CardBody>
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+    <Card className="relative overflow-hidden border-white/10 bg-[radial-gradient(1200px_600px_at_-10%_-10%,rgba(99,102,241,.15),transparent),radial-gradient(900px_500px_at_110%_-10%,rgba(236,72,153,.12),transparent)]">
+      {/* Soft glow corners */}
+      <div className="pointer-events-none absolute -top-28 -left-28 w-[42rem] h-[42rem] rounded-full bg-indigo-500/10 blur-3xl" />
+      <div className="pointer-events-none absolute -bottom-24 -right-24 w-[36rem] h-[36rem] rounded-full bg-rose-500/10 blur-3xl" />
+
+      <CardBody className="relative">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
-            <h2 className="text-2xl font-semibold text-white drop-shadow-sm">Simple Screen Share</h2>
-            <p className="text-slate-300/90 text-sm mt-1">
-              {mode === "extend"
-                ? "Extend: Yeni pəncərə açılır — screen picker-də o pəncərəni seç."
-                : "Mirror: Burada önbaxış, qarşı tərəfə eyni görüntü gedir."}
+            <h2 className="text-2xl md:text-3xl font-semibold tracking-tight bg-clip-text text-transparent bg-gradient-to-br from-white to-white/70">
+              Simple Screen Share
+            </h2>
+            <p className="mt-1 text-sm text-white/70">
+              Minimal • Simple • Rapid
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -406,29 +408,44 @@ export default function ScreenShareRTC() {
           </div>
         </div>
 
-        {!joined && (
-          <div className="mt-6 space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <Button className={role === "presenter" ? "" : "bg-white/10 text-white hover:bg-white/20"} onClick={() => setRole("presenter")}>I am Presenter</Button>
-              <Button className={role === "viewer" ? "" : "bg-white/10 text-white hover:bg-white/20"} onClick={() => setRole("viewer")}>I am Viewer</Button>
+        
+        <RenderIf condition={!joined}>
+          <div className="mt-6 space-y-5">
+            {/* Segmented role buttons */}
+            <div className="inline-flex gap-2 rounded-2xl border border-white/10 bg-white/5 p-1 shadow-inner ">
+              <Button className={` ${role === "presenter" ? "" : "!bg-transparent hover:bg-white/10"}`} onClick={() => setRole("presenter")}>
+                Presenter
+              </Button>
+              <Button className={` ${role === "viewer" ? "" : "bg-transparent hover:bg-white/10"}`} onClick={() => setRole("viewer")}>
+                Viewer
+              </Button>
             </div>
 
             {role === "presenter" && (
               <>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <Button className={mode === "mirror" ? "" : "bg-white/10 text-white hover:bg-white/20"} onClick={() => setMode("mirror")}>Mirror</Button>
-                  <Button className={mode === "extend" ? "" : "bg-white/10 text-white hover:bg-white/20"} onClick={() => setMode("extend")}>Extend</Button>
+                {/* Segmented mode */}
+                <div className="inline-flex rounded-2xl border border-white/10 bg-white/5 p-1 shadow-inner">
+                  <Button className={mode === "mirror" ? "" : "bg-transparent hover:bg-white/10"} onClick={() => setMode("mirror")}>Mirror</Button>
+                  <Button className={mode === "extend" ? "" : "bg-transparent hover:bg-white/10"} onClick={() => setMode("extend")}>Extend</Button>
                 </div>
 
+                {/* Room actions */}
                 <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto_auto_auto] gap-2">
-                  <Input inputMode="numeric" pattern="[0-9]*" placeholder="Otaq kodu (8 rəqəm)" maxLength={8}
-                         value={room} onChange={(e) => setRoom(e.target.value.replace(/\D/g, "").slice(0, 8))} />
+                  <Input
+                    inputMode="numeric" pattern="[0-9]*" placeholder="Otaq kodu (8 rəqəm)" maxLength={8}
+                    value={room} onChange={(e) => setRoom(e.target.value.replace(/\D/g, "").slice(0, 8))}
+                  />
                   <Button onClick={() => setRoom(generateRoomCode())}>Generate</Button>
-                  <Button onClick={async () => { if (!room) return; await navigator.clipboard.writeText(room); setCopyOk(true); window.setTimeout(() => setCopyOk(false), 1000); }}>
+                  <Button
+                    onClick={async () => { if (!room) return; await navigator.clipboard.writeText(room); setCopyOk(true); window.setTimeout(() => setCopyOk(false), 900); }}
+                    className={copyOk ? "bg-emerald-600/90 hover:bg-emerald-600" : ""}
+                  >
                     {copyOk ? "Copied ✓" : "Copy"}
                   </Button>
                   {!isStopped ? (
-                    <Button onClick={startAsPresenter}>Start (Presenter)</Button>
+                    <Button className="bg-indigo-600/90 hover:bg-indigo-600 shadow-[0_10px_30px_-12px_rgba(99,102,241,.6)]" onClick={startAsPresenter}>
+                      Start (Presenter)
+                    </Button>
                   ) : (
                     <Button className="bg-emerald-600/90 hover:bg-emerald-600" onClick={resumePresenting}>Resume</Button>
                   )}
@@ -438,20 +455,28 @@ export default function ScreenShareRTC() {
 
             {role === "viewer" && (
               <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto_auto] gap-2">
-                <Input inputMode="numeric" pattern="[0-9]*" placeholder="Otaq kodu (8 rəqəm)" maxLength={8}
-                       value={room} onChange={(e) => setRoom(e.target.value.replace(/\D/g, "").slice(0, 8))} />
-                <Button onClick={async () => { if (!room) return; await navigator.clipboard.writeText(room); setCopyOk(true); window.setTimeout(() => setCopyOk(false), 1000); }}>
+                <Input
+                  inputMode="numeric" pattern="[0-9]*" placeholder="Otaq kodu (8 rəqəm)" maxLength={8}
+                  value={room} onChange={(e) => setRoom(e.target.value.replace(/\D/g, "").slice(0, 8))}
+                />
+                <Button
+                  onClick={async () => { if (!room) return; await navigator.clipboard.writeText(room); setCopyOk(true); window.setTimeout(() => setCopyOk(false), 900); }}
+                  className={copyOk ? "bg-emerald-600/90 hover:bg-emerald-600" : ""}
+                >
                   {copyOk ? "Copied ✓" : "Copy"}
                 </Button>
-                <Button className="bg-sky-600/90 hover:bg-sky-600" onClick={startAsViewer}>Join (Viewer)</Button>
+                <Button className="bg-sky-600/90 hover:bg-sky-600 shadow-[0_10px_30px_-12px_rgba(2,132,199,.6)]" onClick={startAsViewer}>
+                  Join (Viewer)
+                </Button>
               </div>
             )}
           </div>
-        )}
+        </RenderIf>
 
-        {joined && (
-          <div className="mt-6 space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+        <RenderIf condition={joined}> 2
+          <div className="mt-6 space-y-5">
+            {/* Top action bar */}
+            <div className="flex flex-col lg:flex-row lg:items-center gap-3">
               <div className="flex flex-wrap items-center gap-2">
                 <Tag>Room: {room || "-"}</Tag>
                 <Tag>Role: {role ?? "-"}</Tag>
@@ -460,41 +485,52 @@ export default function ScreenShareRTC() {
 
               <div className="flex-1" />
 
-              {role === "viewer" && (
-                <Button className="bg-emerald-600/90 hover:bg-emerald-600" onClick={() => {
-                  const el = videoRef.current; if (!el) return;
-                  if (document.fullscreenElement) void document.exitFullscreen();
-                  else void el.requestFullscreen();
-                }}>
-                  Fullscreen
-                </Button>
-              )}
-
-              {role === "presenter" && !isStopped && (
-                <div className="flex gap-2">
-                  <Button className={isPaused ? "bg-amber-600/90 hover:bg-amber-600" : "bg-white/10 hover:bg-white/20"} onClick={togglePause}>
-                    {isPaused ? "Resume" : "Pause"}
+              {/* Right side actions */}
+              <div className="flex flex-wrap items-center gap-2">
+                {role === "viewer" && (
+                  <Button
+                    className="bg-emerald-600/90 hover:bg-emerald-600"
+                    onClick={() => {
+                      const el = videoRef.current; if (!el) return;
+                      if (document.fullscreenElement) void document.exitFullscreen();
+                      else void el.requestFullscreen();
+                    }}
+                  >
+                    Fullscreen
                   </Button>
-                  <Button className="bg-amber-600/90 hover:bg-amber-600" onClick={stopPresenting}>Stop</Button>
-                </div>
-              )}
-              {role === "presenter" && isStopped && (
-                <Button className="bg-emerald-600/90 hover:bg-emerald-600" onClick={resumePresenting}>Resume</Button>
-              )}
+                )}
 
-              {isPiPSupported() && (
-                <Button className={pipOn ? "bg-white/20" : ""} onClick={togglePiP}>
-                  {pipOn ? "Exit PiP" : "Picture-in-Picture"}
-                </Button>
-              )}
+                {role === "presenter" && !isStopped && (
+                  <>
+                    <Button
+                      className={isPaused ? "bg-amber-600/90 hover:bg-amber-600" : "bg-white/10 hover:bg-white/20"}
+                      onClick={togglePause}
+                    >
+                      {isPaused ? "Resume" : "Pause"}
+                    </Button>
+                    <Button className="bg-amber-600/90 hover:bg-amber-600" onClick={stopPresenting}>Stop</Button>
+                  </>
+                )}
+                {role === "presenter" && isStopped && (
+                  <Button className="bg-emerald-600/90 hover:bg-emerald-600" onClick={resumePresenting}>Resume</Button>
+                )}
 
-              <Button className="bg-rose-600/90 hover:bg-rose-600" onClick={leave}>Leave</Button>
+                {isPiPSupported() && (
+                  <Button className={pipOn ? "bg-white/20" : ""} onClick={togglePiP}>
+                    {pipOn ? "Exit PiP" : "Picture-in-Picture"}
+                  </Button>
+                )}
+
+                <Button className="bg-rose-600/90 hover:bg-rose-600" onClick={leave}>Leave</Button>
+              </div>
             </div>
 
-            {/* Video + Status overlays */}
-            <div className={`relative rounded-3xl overflow-hidden border-2 ${tintBox(tint)} backdrop-blur-xl shadow-2xl`}>
-              {/* Üst STATUS banner (rəngli) */}
-              <div className={`absolute left-4 top-4 px-3 py-1 rounded-xl border text-xs font-semibold ${tintChip(tint)}`}>
+            {/* Video + overlays */}
+            <div
+              className={`relative rounded-3xl overflow-hidden border-2 ${tintBox(tint)} backdrop-blur-xl shadow-[0_30px_120px_-30px_rgba(0,0,0,.8)]`}
+            >
+              {/* Status chip (floating) */}
+              <div className={`absolute left-4 top-4 px-3 py-1.5 rounded-xl border text-xs font-semibold ${tintChip(tint)} shadow-lg`}>
                 {tint === "connected" ? "Connected"
                   : tint === "paused"   ? "Paused"
                   : tint === "alone"    ? "Waiting…"
@@ -502,30 +538,33 @@ export default function ScreenShareRTC() {
                   : "Idle"}
               </div>
 
+              {/* subtle top gradient */}
+              <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-black/30 to-transparent" />
+
               <video
                 ref={videoRef}
                 autoPlay
                 playsInline
                 muted={role === "presenter"}
-                className="w-full aspect-video sm:max-h-[74vh] h-[46vh] object-contain"
+                className="w-full aspect-video sm:max-h-[74vh] h-[46vh] object-contain bg-black"
               />
 
-              {/* Yüklənir (viewer) */}
+              {/* Loading overlay */}
               {showLoading && (
                 <div className="absolute inset-0 grid place-items-center bg-black/40 backdrop-blur-sm">
                   <div className="flex flex-col items-center gap-3">
-                    <div className="w-12 h-12 rounded-full border-4 border-white/30 border-t-white animate-spin" />
+                    <div className="w-12 h-12 rounded-full border-4 border-white/25 border-t-white animate-spin" />
                     <div className="px-4 py-2 rounded-xl bg-white/10 border border-white/20 text-white font-medium shadow-2xl">
-                      Loading…
+                      Connecting…
                     </div>
                   </div>
                 </div>
               )}
 
-              {/* Presenter STOP edib-sə (viewer) */}
+              {/* Presenter Stopped (viewer) */}
               {showStoppedOverlay && role === "viewer" && (
-                <div className="absolute inset-0 grid place-items-center bg-black/50 backdrop-blur-sm">
-                  <div className="px-5 py-3 rounded-2xl bg-white/10 border border-white/20 text-white text-xl font-semibold shadow-2xl">
+                <div className="absolute inset-0 grid place-items-center bg-black/55 backdrop-blur-sm">
+                  <div className="px-5 py-3 rounded-2xl bg-white/10 border border-white/20 text-white text-base font-semibold shadow-2xl">
                     Presenter stopped sharing
                   </div>
                 </div>
@@ -535,16 +574,18 @@ export default function ScreenShareRTC() {
               <div className="pointer-events-none absolute -inset-px rounded-[inherit] ring-2 ring-white/10" />
             </div>
 
-            {/* Aşağı “legend” (rənglər) */}
+            {/* Legend */}
             <div className="text-xs text-white/75 flex flex-wrap gap-3">
               <span className="inline-flex items-center gap-2"><span className="inline-block w-3 h-3 rounded-full bg-emerald-500" /> Connected</span>
               <span className="inline-flex items-center gap-2"><span className="inline-block w-3 h-3 rounded-full bg-amber-500" /> Paused</span>
-              <span className="inline-flex items-center gap-2"><span className="inline-block w-3 h-3 rounded-full bg-sky-500" /> Alone</span>
+              <span className="inline-flex items-center gap-2"><span className="inline-block w-3 h-3 rounded-full bg-sky-500" /> Waiting</span>
               <span className="inline-flex items-center gap-2"><span className="inline-block w-3 h-3 rounded-full bg-rose-500" /> Stopped</span>
             </div>
           </div>
-        )}
+        
+        </RenderIf>
       </CardBody>
     </Card>
   );
 }
+
