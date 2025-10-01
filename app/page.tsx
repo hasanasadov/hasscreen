@@ -1,27 +1,60 @@
+// app/page.tsx
+import { Glows, NoiseAndGrid, Orbs, Ribbons } from "@/components/ForBackground";
 import Link from "next/link";
 
 export default function Home() {
   return (
-    <main className="min-h-screen relative overflow-hidden flex items-center justify-center p-6 bg-slate-950 text-white">
-      <div className="pointer-events-none absolute inset-0">
-        <div className="absolute -top-24 -left-24 w-[40rem] h-[40rem] rounded-full bg-indigo-500/10 blur-3xl animate-pulse" />
-        <div className="absolute -bottom-20 -right-20 w-[36rem] h-[36rem] rounded-full bg-fuchsia-500/10 blur-3xl animate-pulse [animation-duration:6s]" />
-      </div>
+    <main className="relative z-10 mx-auto flex min-h-[calc(100vh-12rem)] max-w-7xl items-center justify-center px-4">
+      <Glows />
+      <Ribbons />
+      <NoiseAndGrid />
+      <section className="relative w-full">
+        <Orbs />
+        <div className="relative mx-auto max-w-3xl overflow-hidden rounded-[2rem] border border-white/10 bg-white/[0.06] p-8 sm:p-10 backdrop-blur-2xl shadow-[0_30px_120px_-30px_rgba(0,0,0,.65)]">
+          <h1 className="bg-gradient-to-br from-white to-white/70 bg-clip-text text-transparent text-[clamp(30px,6vw,56px)] font-semibold leading-tight tracking-tight">
+            Simple Screen&nbsp;Share
+          </h1>
 
-      <div className="w-full max-w-2xl rounded-3xl p-8 backdrop-blur-2xl bg-white/[0.06] border-2 border-white/10 shadow-[0_20px_80px_-20px_rgba(0,0,0,.65)]">
-        <h1 className="text-3xl md:text-4xl font-semibold tracking-tight bg-clip-text text-transparent bg-gradient-to-br from-white to-white/70">
-          Simple Screen Share
-        </h1>
-        <p className="text-white/70 mt-3">
-          8 rəqəmli kodu paylaş → biri <b>Start sharing</b>, digəri <b>Join to view</b> etsin.
-        </p>
-        <Link
-          href="/screenshare"
-          className="inline-flex items-center mt-6 px-5 py-3 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-500 text-white hover:from-indigo-400 hover:to-violet-400 transition shadow-[0_15px_40px_-12px_rgba(99,102,241,.6)]"
-        >
-          Aç →
-        </Link>
-      </div>
+          <p className="mt-3 max-w-prose text-sm sm:text-base text-white/70">
+            8 rəqəmli kodla dərhal paylaş. Heç bir qeydiyyat, link və s. yoxdur.
+          </p>
+
+          <div className="mt-8 flex items-center gap-3">
+            <Link
+              href="/screenshare"
+              className="relative inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-gradient-to-br from-indigo-500 to-fuchsia-500 px-6 py-3 text-sm sm:text-base font-semibold text-white shadow-[0_15px_40px_-12px_rgba(99,102,241,.6)] transition-colors hover:from-indigo-400 hover:to-fuchsia-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300/50"
+              aria-label="Screenshare səhifəsinə keç"
+            >
+              Başla
+              <span className="pointer-events-none absolute inset-0 rounded-2xl btn-shimmer opacity-0 transition-opacity duration-300 group-hover:opacity-40 motion-safe:animate-shimmer" />
+              <svg
+                className="size-4 transition-transform duration-300 motion-safe:group-hover:translate-x-0.5"
+                viewBox="0 0 24 24"
+                fill="none"
+                aria-hidden
+              >
+                <path
+                  d="M5 12h14M13 5l7 7-7 7"
+                  stroke="currentColor"
+                  strokeWidth={1.6}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </Link>
+
+            <span className="text-[11px] sm:text-xs text-white/55">
+              HTTPS + STUN/TURN ilə stabil bağlantı
+            </span>
+          </div>
+
+          {/* inner ring */}
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0 rounded-[2rem] ring-1 ring-inset ring-white/10"
+          />
+        </div>
+      </section>
     </main>
   );
 }

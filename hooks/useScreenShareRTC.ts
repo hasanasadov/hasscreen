@@ -65,6 +65,12 @@ export function useScreenShareRTC() {
     const pc = new RTCPeerConnection(rtcConfig);
     pcRef.current = pc;
 
+    if (role === "viewer") {
+      try {
+        // Make sure there's a video m= section ready to receive
+        pc.addTransceiver("video", { direction: "recvonly" });
+      } catch {}
+    }
     pc.onicecandidate = (e) => {
       if (!e.candidate) return;
       const side: "offer" | "answer" =
@@ -83,18 +89,37 @@ export function useScreenShareRTC() {
       if (pc.connectionState === "connected") setStatus("Connected");
     };
     pc.ontrack = (e: RTCTrackEvent) => {
-      if (role === "viewer" && videoRef.current) {
-        const [stream] = e.streams;
-        hadRemoteRef.current = true;
-        setHasRemote(true);
-        setShowStoppedOverlay(false);
-        const v = videoRef.current;
-        v.srcObject = stream;
-        v.muted = true;
-        const play = () => void v.play().catch(() => {});
-        if (v.readyState >= 2) play();
-        else v.onloadedmetadata = play;
+      if (role !== "viewer" || !videoRef.current) return;
+
+      const [stream] = e.streams;
+      const v = videoRef.current;
+
+      // Always set the srcObject, but we’ll only play when frames start
+      v.srcObject = stream;
+      v.muted = true; // keep autoplay-friendly
+      v.playsInline = true;
+
+      const videoTrack = stream.getVideoTracks()?.[0];
+
+      const tryPlay = () => {
+        // small delay helps after codec negotiation on some browsers
+        setTimeout(() => void v.play().catch(() => {}), 0);
+      };
+
+      // some browsers fire ontrack while track is still muted
+      if (videoTrack && videoTrack.muted) {
+        videoTrack.onunmute = () => {
+          videoTrack.onunmute = null;
+          tryPlay();
+        };
+      } else {
+        // already unmuted
+        tryPlay();
       }
+
+      hadRemoteRef.current = true;
+      setHasRemote(true);
+      setShowStoppedOverlay(false);
     };
   }, [role, rtcConfig]);
 
@@ -106,6 +131,7 @@ export function useScreenShareRTC() {
       local.getTracks().forEach((t) => t.stop());
       localStreamRef.current = null;
     }
+
     if (videoRef.current) videoRef.current.srcObject = null;
     const pc = pcRef.current;
     if (pc) {
@@ -282,6 +308,20 @@ export function useScreenShareRTC() {
       });
 
       localStreamRef.current = stream;
+      // after: localStreamRef.current = stream;
+      const vt = stream.getVideoTracks()[0];
+      if (vt) {
+        // helps screen text clarity on Chrome
+        vt.contentHint = "detail";
+
+        // if the track ends (user stops sharing), reflect state
+        vt.onended = () => {
+          vt.onended = () => { void signaling.close(r); setIsStopped(true); setStatus("Stopped"); };
+
+          setIsStopped(true);
+          setStatus("Stopped");
+        };
+      }
 
       setRole("presenter");
       setJoined(true);

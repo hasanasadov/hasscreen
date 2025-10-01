@@ -131,3 +131,61 @@ body {
     @apply bg-background text-foreground;
   }
 }
+
+
+/* ====== Animated background helpers (motion-safe) ====== */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes auroraShift {
+    0% { transform: translate3d(-10%, -10%, 0) rotate(0deg) scale(1); filter: hue-rotate(0deg); }
+    50% { transform: translate3d(10%, 10%, 0) rotate(10deg) scale(1.1); filter: hue-rotate(30deg); }
+    100% { transform: translate3d(-10%, -10%, 0) rotate(0deg) scale(1); filter: hue-rotate(0deg); }
+  }
+  @keyframes floatY {
+    0% { transform: translateY(0px); }
+    50% { transform: translateY(-16px); }
+    100% { transform: translateY(0px); }
+  }
+  @keyframes floatX {
+    0% { transform: translateX(0px); }
+    50% { transform: translateX(12px); }
+    100% { transform: translateX(0px); }
+  }
+  @keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+  @keyframes breathe {
+    0%,100% { transform: scale(1); opacity: .5; }
+    50% { transform: scale(1.04); opacity: .75; }
+  }
+}
+
+/* utility classes (Tailwind-la birlikdə) */
+.aurora {
+  mask-image: radial-gradient(60% 60% at 50% 40%, black, transparent);
+}
+.motion-safe .animate-aurora { animation: auroraShift 16s ease-in-out infinite; }
+.motion-safe .animate-float-y { animation: floatY 5.5s ease-in-out infinite; }
+.motion-safe .animate-float-x { animation: floatX 7s ease-in-out infinite; }
+.motion-safe .animate-breathe { animation: breathe 6s ease-in-out infinite; }
+
+/* button shimmer */
+.btn-shimmer {
+  background-image: linear-gradient(90deg,
+    rgba(255,255,255,.25) 0%,
+    rgba(255,255,255,.55) 20%,
+    rgba(255,255,255,.25) 40%,
+    rgba(255,255,255,.25) 100%);
+  background-size: 200% 100%;
+}
+.motion-safe .animate-shimmer { animation: shimmer 2.2s linear infinite; }
+
+/* ultra-subtle noise */
+/* .bg-noise {
+  background-image: url("data:image/svg+xml;utf8,\
+<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120' viewBox='0 0 120 120'>\
+<filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter>\
+<rect width='120' height='120' filter='url(%23n)' opacity='0.5'/></svg>");
+  opacity: .04;
+  mix-blend-soft-light;
+} */

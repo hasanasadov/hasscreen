@@ -11,8 +11,8 @@ export const Card: React.FC<
 > = ({ className, children }) => (
   <div className={cx(glass.shell, className)}>
     {/* gentle scene glows */}
-    <div className="pointer-events-none absolute -top-40 -left-36 h-[40rem] w-[40rem] rounded-full bg-gradient-to-br from-indigo-500/20 via-fuchsia-500/10 to-transparent blur-3xl" />
-    <div className="pointer-events-none absolute -bottom-32 -right-24 h-[32rem] w-[32rem] rounded-full bg-gradient-to-tl from-rose-500/20 via-purple-500/10 to-transparent blur-3xl" />
+    {/* <div className="pointer-events-none absolute -top-40 -left-36 h-[40rem] w-[40rem] rounded-full bg-gradient-to-br from-indigo-500/20 via-fuchsia-500/10 to-transparent blur-3xl" /> */}
+    {/* <div className="pointer-events-none absolute -bottom-32 -right-24 h-[32rem] w-[32rem] rounded-full bg-gradient-to-tl from-rose-500/20 via-purple-500/10 to-transparent blur-3xl" /> */}
     {children}
   </div>
 );
@@ -30,6 +30,7 @@ export const Button = React.forwardRef<
   <button
     ref={ref}
     className={cx(
+      "!shadow-[0_15px_40px_-12px_rgba(99,102,241,.6)] transition-colors ",
       "inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold text-white",
       "bg-white/10 hover:bg-white/20 active:bg-white/25 transition-all backdrop-blur",
       "border border-white/10 shadow-[0_8px_30px_-12px_rgba(0,0,0,.55)]",

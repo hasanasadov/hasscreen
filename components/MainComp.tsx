@@ -24,8 +24,8 @@ export default function MainComp() {
     setRoom,
     joined,
     status,
-    copyOk,
-    setCopyOk,
+    // copyOk,
+    // setCopyOk,
     showStoppedOverlay,
     isStopped,
     isPaused,
@@ -69,16 +69,16 @@ export default function MainComp() {
                     label: "Generate",
                     onClick: () => setRoom(generateRoomCode()),
                   },
-                  {
-                    label: copyOk ? "Copied ✓" : "Copy",
-                    onClick: async () => {
-                      if (!room) return;
-                      await navigator.clipboard.writeText(room);
-                      setCopyOk(true);
-                      window.setTimeout(() => setCopyOk(false), 900);
-                    },
-                    tone: copyOk ? "ok" : "default",
-                  },
+                  // {
+                  //   label: copyOk ? "Copied ✓" : "Copy",
+                  //   onClick: async () => {
+                  //     if (!room) return;
+                  //     await navigator.clipboard.writeText(room);
+                  //     setCopyOk(true);
+                  //     window.setTimeout(() => setCopyOk(false), 900);
+                  //   },
+                  //   tone: copyOk ? "ok" : "default",
+                  // },
                   {
                     label: "Start (Presenter)",
                     onClick: startAsPresenter,
@@ -93,16 +93,16 @@ export default function MainComp() {
                 room={room}
                 setRoom={setRoom}
                 buttons={[
-                  {
-                    label: copyOk ? "Copied ✓" : "Copy",
-                    onClick: async () => {
-                      if (!room) return;
-                      await navigator.clipboard.writeText(room);
-                      setCopyOk(true);
-                      window.setTimeout(() => setCopyOk(false), 900);
-                    },
-                    tone: copyOk ? "ok" : "default",
-                  },
+                  // {
+                  //   label: copyOk ? "Copied ✓" : "Copy",
+                  //   onClick: async () => {
+                  //     if (!room) return;
+                  //     await navigator.clipboard.writeText(room);
+                  //     setCopyOk(true);
+                  //     window.setTimeout(() => setCopyOk(false), 900);
+                  //   },
+                  //   tone: copyOk ? "ok" : "default",
+                  // },
                   {
                     label: "Join (Viewer)",
                     onClick: startAsViewer,
