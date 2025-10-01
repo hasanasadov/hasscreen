@@ -41,7 +41,17 @@ export function useScreenShareRTC() {
   // rtc config
   const rtcConfig = useMemo<RTCConfiguration>(
     () => ({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+      iceServers: [
+        { urls: "stun:stun.l.google.com:19302" },
+        {
+          urls: (process.env.NEXT_PUBLIC_TURN_URLS || "")
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean),
+          username: process.env.NEXT_PUBLIC_TURN_USERNAME,
+          credential: process.env.NEXT_PUBLIC_TURN_PASSWORD,
+        },
+      ],
     }),
     []
   );
@@ -91,29 +101,24 @@ export function useScreenShareRTC() {
     pc.ontrack = (e: RTCTrackEvent) => {
       if (role !== "viewer" || !videoRef.current) return;
 
-      const [stream] = e.streams;
+      // Some browsers fire ontrack with empty e.streams — build one if needed
+      const stream = e.streams?.[0] || new MediaStream([e.track]);
       const v = videoRef.current;
 
-      // Always set the srcObject, but we’ll only play when frames start
       v.srcObject = stream;
-      v.muted = true; // keep autoplay-friendly
+      v.muted = true;
       v.playsInline = true;
 
+      const tryPlay = () => setTimeout(() => void v.play().catch(() => {}), 0);
+
+      // When track is muted (no frames yet), wait for first real frame
       const videoTrack = stream.getVideoTracks()?.[0];
-
-      const tryPlay = () => {
-        // small delay helps after codec negotiation on some browsers
-        setTimeout(() => void v.play().catch(() => {}), 0);
-      };
-
-      // some browsers fire ontrack while track is still muted
       if (videoTrack && videoTrack.muted) {
         videoTrack.onunmute = () => {
           videoTrack.onunmute = null;
           tryPlay();
         };
       } else {
-        // already unmuted
         tryPlay();
       }
 
@@ -285,6 +290,11 @@ export function useScreenShareRTC() {
       let stream: MediaStream;
       try {
         stream = await navigator.mediaDevices.getDisplayMedia(constraints);
+        // after getDisplayMedia
+        const vt = stream.getVideoTracks()[0];
+        try {
+          vt.contentHint = "detail";
+        } catch {}
       } catch (e: unknown) {
         if (
           isDomException(e) &&
@@ -316,7 +326,11 @@ export function useScreenShareRTC() {
 
         // if the track ends (user stops sharing), reflect state
         vt.onended = () => {
-          vt.onended = () => { void signaling.close(r); setIsStopped(true); setStatus("Stopped"); };
+          vt.onended = () => {
+            void signaling.close(r);
+            setIsStopped(true);
+            setStatus("Stopped");
+          };
 
           setIsStopped(true);
           setStatus("Stopped");
@@ -350,12 +364,20 @@ export function useScreenShareRTC() {
       const ansPoll = window.setInterval(async () => {
         try {
           const data = await signaling.getAnswer(r);
-          if (data.sdp && pc.signalingState !== "stable") {
-            await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
-            setStatus("Connected");
+          if (data.sdp) {
+            const desc = new RTCSessionDescription(data.sdp);
+            // Only set if it's a new SDP to avoid needless re-sets
+            if (
+              !pc.currentRemoteDescription ||
+              pc.currentRemoteDescription.sdp !== desc.sdp
+            ) {
+              await pc.setRemoteDescription(desc);
+              setStatus("Connected");
+            }
           }
         } catch {}
       }, 900);
+
       pollTimers.current.push(ansPoll);
 
       const candPoll = window.setInterval(async () => {
@@ -475,6 +497,10 @@ export function useScreenShareRTC() {
             setStatus("Answer posted");
             offerCandIdx.current = 0;
             lastOfferRevRef.current = rev;
+
+            // Autoplay nudge after answer
+            const v = videoRef.current;
+            if (v) setTimeout(() => void v.play().catch(() => {}), 0);
           }
         } catch {}
       }, 900);

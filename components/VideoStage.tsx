@@ -2,7 +2,11 @@ import { cx, glass, tintBackdrop, tintChip } from "@/lib/helpers";
 import { Role, Tint } from "@/types";
 
 export function VideoStage({
-  refEl, role, tint, showLoading, showStoppedOverlay,
+  refEl,
+  role,
+  tint,
+  showLoading,
+  showStoppedOverlay,
 }: {
   refEl: React.RefObject<HTMLVideoElement>;
   role: Role | null;
@@ -11,17 +15,24 @@ export function VideoStage({
   showStoppedOverlay: boolean;
 }) {
   return (
-    <div className={cx(
-      "relative overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br",
-      tintBackdrop(tint), glass.ring
-    )}>
+    <div
+      className={cx(
+        "relative overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br",
+        tintBackdrop(tint),
+        glass.ring
+      )}
+    >
       {/* floating status */}
       <div className="absolute left-4 top-4">
         <span className={tintChip(tint)}>
-          {tint === "connected" ? "Connected"
-            : tint === "paused"   ? "Paused"
-            : tint === "alone"    ? "Waiting…"
-            : tint === "stopped"  ? "Stopped"
+          {tint === "connected"
+            ? "Connected"
+            : tint === "paused"
+            ? "Paused"
+            : tint === "alone"
+            ? "Waiting…"
+            : tint === "stopped"
+            ? "Stopped"
             : "Idle"}
         </span>
       </div>
@@ -35,6 +46,8 @@ export function VideoStage({
         playsInline
         muted={role === "presenter"}
         className="w-full aspect-video sm:max-h-[74vh] h-[46vh] object-contain bg-black"
+        preload="auto"
+        disablePictureInPicture
       />
 
       {/* loading */}
