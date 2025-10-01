@@ -47,7 +47,6 @@ export function VideoStage({
         muted={role === "presenter"}
         className="w-full aspect-video sm:max-h-[74vh] h-[46vh] object-contain bg-black"
         preload="auto"
-        disablePictureInPicture
       />
 
       {/* loading */}
